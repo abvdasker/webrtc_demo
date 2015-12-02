@@ -39,9 +39,9 @@ post "/users" do
   content_type :json
   user_json = JSON.parse(request.body.read)
   user = User.new(user_json["username"])
-  unless settings.users[user.username]
-    settings.users[user.username] = user
-  end
+  return nil if settings.users[user.username]
+
+  settings.users[user.username] = user
   user.to_json
 end
 
