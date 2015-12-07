@@ -3,62 +3,30 @@ require "sinatra-websocket"
 require "json"
 require "pry"
 
+require "./action_handler"
+
 set :server, 'thin'
 set :base, File.dirname(__FILE__)
 set :public_folder, settings.base + "/static"
 set :users, {}
 set :sockets, {}
 
-class User
-  attr_reader :username
-  attr_accessor :socket
-
-  def initialize(username)
-    @username = username
-  end
-
-  def to_json(options = {})
-    {
-      username: username
-    }.to_json
-  end
-end
-
-def broadcast_users
-  users = settings.users.values
-  users.each do |user|
-    user.socket.send((users - [user]).to_json)
-  end
-end
+handler = ActionHandler.new(settings)
 
 get "/" do
   File.new(settings.public_folder + "/index.html")
 end
 
-post "/users" do
-  content_type :json
-  user_json = JSON.parse(request.body.read)
-  user = User.new(user_json["username"])
-  return nil if settings.users[user.username]
-
-  settings.users[user.username] = user
-  user.to_json
-end
-
-get "/users" do
+get "/socket" do
   request.websocket do |ws|
-    ws.onmessage do |msg|
-      user_json = JSON.parse(msg)
-      current_user = settings.users[user_json["username"]]
-      current_user.socket = ws
-      settings.sockets[ws] = current_user
-      EM.next_tick { broadcast_users }
+    #ws.onopen do
+    #end
+    ws.onmessage do |raw|
+      message = JSON.parse(raw)
+      handler.handle(ws, message)
     end
     ws.onclose do
-      current_user = settings.sockets[ws]
-      settings.sockets.delete(ws)
-      settings.users.delete(current_user.username)
-      EM.next_tick { broadcast_users }
+      handler.handle_close(ws)
     end
   end
 end

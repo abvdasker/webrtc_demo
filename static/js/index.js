@@ -6,7 +6,125 @@ var IceCandidate = window.mozRTCIceCandidate || window.RTCIceCandidate;
 var SessionDescription = window.mozRTCSessionDescription || window.RTCSessionDescription;
 navigator.getUserMedia = navigator.getUserMedia || navigator.mozGetUserMedia || navigator.webkitGetUserMedia;
 
+var App = (function() {
+
+  var users = [];
+  var me;
+  var candidate;
+
+  var init = function() {
+    console.log("starting app");
+    ServerConnection.init();
+    setListeners();
+    PeerChat.init();
+  };
+
+  var setListeners = function() {
+    var $userNameButton = $("#set-user-name");
+    $userNameButton.on("click", createUserClick);
+    console.log("setting listeners");
+    $("#chat-toggle").on("click", toggleChat);
+  };
+  
+  var createUserClick = function(e) {
+    var newUsername = $("#user-name").val();
+    console.log("click");
+    candidate = new User(newUsername);
+    ServerConnection.createNewUser(newUsername);
+  }
+
+  var toggleChat = function() {
+    var selectedUsername = $("#user-list").val()[0];
+    console.log("selected to chat with" + selectedUsername);
+    ServerConnection.sendOffer(selectedUsername);
+  }
+
+  var updateUsers = function(message) {
+    if (me == null) {
+      me = candidate;
+      createUserSuccess();
+    }
+    var userList = message["users"];
+    var $userList = $("#user-list");
+    $userList.empty();
+    users = [];
+    for (var i in userList) {
+      var user = new User(userList[i]["username"]);
+      users.push(user);
+      $userList.append("<option>" + user.username + "</option>");
+    }
+  };
+
+  var createUserSuccess = function(data) {
+    $("#set-user-name").remove();
+    $("#user-name").remove();
+    $("#set-user-name-label").remove();
+    $("body").prepend("<h2>Welcome " + me.username + "</h2>");
+    $("#main-app").removeClass("hidden");
+  };
+
+  var getMe = function() {
+    return me;
+  }
+
+  return {
+    init: init,
+    updateUsers: updateUsers,
+    getMe: getMe
+  };
+})();
+
+var ServerConnection = (function() {
+  var socket;
+  var init = function() {
+    startWebSocket();
+  };
+  
+  var startWebSocket = function() {
+    socket = new WebSocket("ws://127.0.0.1:4567/socket");
+    socket.onopen = function() {
+      console.log("connection open");
+    }
+    socket.onmessage = handleAction;
+  };
+
+  var handleAction = function(msg) {
+    messageJSON = JSON.parse(msg.data);
+    action = messageJSON["action"];
+    console.log(messageJSON);
+    console.log(action);
+    if (action == "updateUsers") {
+      App.updateUsers(messageJSON);
+      return true;
+    } else {
+      console.log("unidentified action");
+      return false;
+    }
+  };
+
+  var createNewUser = function(username) {
+    console.log("sending username " + username + " to server");
+    message = { action: "createUser", username: username }
+    socket.send(JSON.stringify(message));
+  };
+
+  var sendOffer = function(from, to) {
+    var message = {
+      action: "sendOffer",
+      from: fromUser,
+      to: toUser
+    }
+  }
+  
+  return {
+    init: init,
+    createNewUser: createNewUser
+  };
+})();
+
 var PeerChat = (function() {
+
+  var candidate;
   var rtcConfig = {
     iceServers: [
       {urls: "stun:stun2.l.google.com:19302"}
@@ -16,20 +134,32 @@ var PeerChat = (function() {
     
   };
 
-  var me;
   var init = function() {
-    var $userNameButton = $("#set-user-name");
-    $userNameButton.on("click", createUserClick);
-    $("#chat-toggle").on("click", toggleChat);
     setupWebRTC();
   }
+  /*
+Outgoing:
+1. get ice candidate (STUN)
+2. Find peer
+3. Create offer
+  3a) set local description
+  3b) local description set
+4. Transmit offer to peer through signaling channel
+5. Receive peer answer
+6. Chat!
+
+Incoming
+1. get offer
+2. send anser
+3. Chat!
+*/
 
   var setupWebRTC = function() {
     console.log(rtcConfig);
     console.log("initializing webrtc connection");
     var conn = new RTCPeerConnection(rtcConfig);
+    conn.onicecandidate = handleIceCandidate; // 1
     var dataChannel = conn.createDataChannel({ordered: false, maxRetransmitTime: 3000});
-    conn.onicecandidate = handleIceCandidate;
     var offer = conn.createOffer(onOfferCreated.bind(conn), onError);
   }
 
@@ -48,62 +178,24 @@ var PeerChat = (function() {
     console.log(e);
     if (e.candidate) {
       console.log(e.candidate);
+      candidate = e.candidate;
     } else {
       return;
     }
   }
-
-  var createUserClick = function(e) {
-    var newUsername = $("#user-name").val();
-    $.post("/users", JSON.stringify({ username: newUsername }), createUserSuccess, "json");
-  }
-
-  var createUserSuccess = function(data) {
-    me = new User(data["username"]);
-    $("#set-user-name").remove();
-    $("#user-name").remove();
-    $("#set-user-name-label").remove();
-    $("body").prepend("<h2>Welcome " + me.username + "</h2>");
-    $("#main-app").removeClass("hidden");
-    startWebSocket();
-  }
-
-  var startWebSocket = function() {
-    var socket = new WebSocket("ws://127.0.0.1:4567/users");
-    socket.onopen = function() {
-      console.log("connection open");
-      socket.send(JSON.stringify(me));
-      console.log("getting users...");
-      me.socket = socket;
-    }
-    socket.onmessage = function(msg) {
-      userList = JSON.parse(msg.data);
-      updateUsers(userList);
-      console.log(userList);
-    }
-  }
-
-  var toggleChat = function() {
-    var selectedUsername = $("#user-list").val();
-    console.log(me);
-  }
-
-  var updateUsers = function(userList) {
-    var $userList = $("#user-list");
-    $userList.empty();
-    for (var i in userList) {
-      var user = userList[i];
-      $userList.append("<option>" + user.username + "</option>");
-    }
-  }
-
+  
   var onError = function(error) {
     window.alert(error.message);
-  }
+  };
+
+  var getCandidate = function() {
+    return candidate;
+  };
   
   return {
-    init: init
-  }
+    init: init,
+    getCandidate: getCandidate
+  };
 })();
 
-window.onload = PeerChat.init;
+window.onload = App.init;
