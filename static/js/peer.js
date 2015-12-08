@@ -19,7 +19,6 @@ var constraints = {
 
 var Peer = function(username) {
   this.username = username;
-  this.channelOpen = false;
   var conn;
   var dataChannel;
   function init() {
