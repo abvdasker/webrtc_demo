@@ -297,7 +297,7 @@ var PeerChat = (function() {
         ServerConnection.sendAnswer(App.getMe().username, username, answer);
       }, App.onError);
     }
-    function handleIceCandidate(event) { // TODO: Figure out why this isn't being fired!
+    function handleIceCandidate(event) {
       if (event.candidate) {
         console.log("new ice candidate found");
         console.log(conn.iceConnectionState);
