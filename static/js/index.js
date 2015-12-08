@@ -68,7 +68,7 @@ var App = (function() {
   }
 
   var onError = function(error) {
-    window.alert(error.message);
+    console.error(error);
   };
 
   return {
@@ -189,37 +189,45 @@ var PeerChat = (function() {
   };
   var connection = {
     optional: [
-      {'DtlsSrtpKeyAgreement': true},
-      {'RtpDataChannels': true }
+      { RtpDataChannels: true }
     ]
   };
   var constraints = {
-    'mandatory':{
-      'offerToReceiveAudio': false,
-      'offerToReceiveVideo': false
+    optional: [],
+    mandatory: {
+      offerToReceiveAudio: false,
+      offerToReceiveVideo: false
     }
   }
 
   var Peer = function(username) {
     this.username = username;
-    var conn = new RTCPeerConnection(rtcConfig, connection);
-    conn.onicecandidate = handleIceCandidate;
-    var dataChannel = conn.createDataChannel("test", {ordered: false, maxRetransmitTime: 3000});
-    dataChannel.onopen = function(e) { console.log("opened channel!"); };
-    conn.ondatachannel = handleDataChannel;
+    this.channelOpen = false;
+    var conn;
+    var dataChannel;
+    function init() {
+      conn = new RTCPeerConnection(rtcConfig, connection);
+      conn.onicecandidate = handleIceCandidate;
+    }
     this.connect = function() {
+      dataChannel = conn.createDataChannel("test");
+      setupDataChannel();
       conn.createOffer(onOfferCreated, App.onError, constraints);
     };
     this.connectFrom = function(offer) {
+      conn.ondatachannel = function(event) {
+        dataChannel = event.channel;
+        setupDataChannel();
+      };
       console.log("offer received");
       console.log(offer);
       var remoteDescription = new RTCSessionDescription(offer);
       conn.setRemoteDescription(remoteDescription, function() {
         console.log("remote description set");
-        conn.createAnswer(onAnswerCreated, App.onError, constraints);
+        conn.createAnswer(onAnswerCreated, App.onError, {}/*constraints*/);
       }, App.onError);
     }
-    var onOfferCreated = function(offer) {
+    function onOfferCreated(offer) {
       console.log("offer created");
       console.log(offer);
       conn.setLocalDescription(offer, function() {
@@ -227,7 +235,7 @@ var PeerChat = (function() {
         ServerConnection.sendOffer(App.getMe().username, username, offer);
       }, App.onError);
     };
-    var onAnswerCreated = function(answer) {
+    function onAnswerCreated(answer) {
       console.log("answer created");
       console.log(answer);
       conn.setLocalDescription(answer, function() {
@@ -235,27 +243,30 @@ var PeerChat = (function() {
         ServerConnection.sendAnswer(App.getMe().username, username, answer);
       }, App.onError);
     }
-    var handleIceCandidate = function(event) { // TODO: Figure out why this isn't being fired!
-      console.log("handling ice candidate");
-      console.log(event);
+    function handleIceCandidate(event) { // TODO: Figure out why this isn't being fired!
       if (event.candidate) {
+        console.log("new ice candidate found");
+        console.log(conn.iceConnectionState);
+        console.log(event.candidate);
         ServerConnection.sendIceCandidate(App.getMe().username, username, event.candidate);
       } else {
         return;
       }
     };
-    var handleDataChannel = function(event) {
-      alert("data channel created");
-    };
     this.onIceCandidateReceived = function(candidateData) {
       var candidate = candidateData.candidate;
       var sdpMLineIndex = candidateData.sdpMLineIndex;
-      console.log(sdpMLineIndex);
       var iceCandidate = new RTCIceCandidate({
         sdpMLineIndex: sdpMLineIndex,
         candidate: candidate
       });
-      conn.addIceCandidate(iceCandidate);
+      
+      console.log(iceCandidate);
+      conn.addIceCandidate(iceCandidate, function() {
+        console.log("success");
+        console.log(conn.iceConnectionState);
+      }, App.onError);
+      console.log("added ice candidate");
     };
     this.onAnswerReceived = function(answer) {
       console.log("answer received " + answer);
@@ -263,8 +274,28 @@ var PeerChat = (function() {
       conn.setRemoteDescription(remoteDescription, function() {
         console.log("remote description set");
       }, App.onError);
-    }
-  }
+    };
+    function setupDataChannel() {
+      dataChannel.onopen = function(e) {
+        console.log("opened channel!");
+        //dataChannel.send("Hello World!");
+        console.log(conn.iceConnectionState);
+      };
+      dataChannel.onmessage = function(event) {
+        console.log(event.data);
+      };
+      dataChannel.onerror = App.onError;
+      dataChannel.onclose = function (event) {
+        console.log("closed!");
+        console.log(event);
+        console.log(conn.iceConnectionState);
+      };
+    };
+    this.send = function(data) {
+      dataChannel.send(data);
+    };
+    init();
+  };
 
   var init = function() {
     setupWebRTC();
@@ -282,16 +313,13 @@ var PeerChat = (function() {
   };
 
   var connectTo = function(username) {
-    currentPeer = new Peer(username);
+    setCurrentPeer(username);
     currentPeer.connect();
   };
 
   var offerReceived = function(fromUsername, offer) {
-    if (currentPeer != null)
-      return;
-
-    var peer = new Peer(fromUsername);
-    peer.connectFrom(offer);
+    setCurrentPeer(fromUsername);
+    currentPeer.connectFrom(offer);
   };
 
   var answerReceived = function(fromUsername, answer) {
@@ -300,8 +328,19 @@ var PeerChat = (function() {
   };
 
   var iceCandidateReceived = function(fromUsername, candidate) {
+    setCurrentPeer(fromUsername);
     if (fromUsername == currentPeer.username)
       currentPeer.onIceCandidateReceived(candidate);
+  }
+
+  var getCurrentPeer = function() {
+    return currentPeer;
+  }
+
+  var setCurrentPeer = function(fromUsername) {
+    if (currentPeer == null) {
+      currentPeer = new Peer(fromUsername);
+    }
   }
   
   return {
@@ -309,7 +348,8 @@ var PeerChat = (function() {
     connectTo: connectTo,
     offerReceived: offerReceived,
     answerReceived: answerReceived,
-    iceCandidateReceived: iceCandidateReceived
+    iceCandidateReceived: iceCandidateReceived,
+    getCurrentPeer: getCurrentPeer
   };
 })();
 

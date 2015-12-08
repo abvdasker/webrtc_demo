@@ -5,6 +5,7 @@ require "pry"
 
 require "./action_handler"
 
+#set :bind, '192.168.0.105'
 set :server, 'thin'
 set :base, File.dirname(__FILE__)
 set :public_folder, settings.base + "/static"

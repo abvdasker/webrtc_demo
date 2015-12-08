@@ -23,6 +23,7 @@ class ActionHandler
   def handle_close(ws)
     user = settings.sockets[ws]
     settings.sockets.delete(ws)
+    return unless user
     settings.users.delete(user.username)
     broadcast_users
   end
