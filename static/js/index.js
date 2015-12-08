@@ -234,7 +234,6 @@ var ServerConnection = (function() {
 })();
 
 var PeerChat = (function() {
-
   var currentPeer;
   var rtcConfig = {
     iceServers: [
@@ -243,7 +242,8 @@ var PeerChat = (function() {
   };
   var connection = {
     optional: [
-      { RtpDataChannels: true }
+      //{ RtpDataChannels: true }, DO NOT ADD THIS; IT APPARENTLY BREAKS CHROME!
+      { DtlsSrtpKeyAgreement: true }
     ]
   };
   var constraints = {
@@ -303,8 +303,6 @@ var PeerChat = (function() {
         console.log(conn.iceConnectionState);
         console.log(event.candidate);
         ServerConnection.sendIceCandidate(App.getMe().username, username, event.candidate);
-      } else {
-        return;
       }
     };
     this.onIceCandidateReceived = function(candidateData) {
