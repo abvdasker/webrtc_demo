@@ -23,6 +23,7 @@ var App = (function() {
     $userNameButton.on("click", createUserClick);
     console.log("setting listeners");
     $("#chat-toggle").on("click", toggleChat);
+    $("#send-message").on("click", sendMessage);
   };
   
   var createUserClick = function(e) {
@@ -32,12 +33,28 @@ var App = (function() {
     ServerConnection.createNewUser(newUsername);
   }
 
-  var toggleChat = function() {
+  var toggleChat = function(event) {
+    var currentPeer = PeerChat.getCurrentPeer();
+    if (currentPeer == null) {
+      connectChat(currentPeer);
+    } else {
+      disconnectChat();
+    }
+  }
+
+  var disconnectChat = function() {
+    var currentPeer = PeerChat.getCurrentPeer();
+    currentPeer.disconnect();
+    endChat();
+  }
+
+  var connectChat = function(currentPeer) {
     var selectedUsername = $("#user-list").val()[0];
+    if (currentPeer && selectedUsername == currentPeer.username)
+      return;
     console.log("selected to chat with " + selectedUsername);
     PeerChat.connectTo(selectedUsername);
-    //ServerConnection.sendOffer(me.username, selectedUsername);
-  }
+  };
 
   var updateUsers = function(message) {
     if (me == null) {
@@ -65,17 +82,54 @@ var App = (function() {
 
   var getMe = function() {
     return me;
-  }
+  };
 
   var onError = function(error) {
     console.error(error);
+  };
+
+  var startChat = function() {
+    var currentPeer = PeerChat.getCurrentPeer();
+    updateCurrentPeerName(currentPeer.username);
+    $("#chat-toggle").html("End chat");
+    $("#send-message").prop("disabled", false);
+  };
+
+  var endChat = function() {
+    PeerChat.clearCurrentPeer();
+    updateCurrentPeerName("");
+    $("#chat-window").text("");
+    $("#chat-toggle").html("Chat!");
+    $("#send-message").prop("disabled", true);
+  };
+
+  var receiveMessage = function(name, data) {
+    var peername = PeerChat.getCurrentPeer().username;
+    $("#chat-window").append(name + ": " + data + "\n");
+  };
+
+  var sendMessage = function() {
+    var $entryBox = $("#entry-box");
+    var message = $entryBox.val();
+    if (message.trim() == "")
+      return;
+    $entryBox.val("");
+    receiveMessage("me", message);
+    PeerChat.getCurrentPeer().send(message);
+  }
+
+  var updateCurrentPeerName = function(name) {
+    $("#current-peer-name").text(name);
   };
 
   return {
     init: init,
     updateUsers: updateUsers,
     getMe: getMe,
-    onError: onError
+    onError: onError,
+    startChat: startChat,
+    endChat: endChat,
+    receiveMessage: receiveMessage
   };
 })();
 
@@ -280,20 +334,26 @@ var PeerChat = (function() {
         console.log("opened channel!");
         //dataChannel.send("Hello World!");
         console.log(conn.iceConnectionState);
+        App.startChat();
       };
       dataChannel.onmessage = function(event) {
         console.log(event.data);
+        App.receiveMessage(username, event.data);
       };
       dataChannel.onerror = App.onError;
       dataChannel.onclose = function (event) {
         console.log("closed!");
         console.log(event);
         console.log(conn.iceConnectionState);
+        App.endChat();
       };
     };
     this.send = function(data) {
       dataChannel.send(data);
     };
+    this.disconnect = function() {
+      dataChannel.close();
+    }
     init();
   };
 
@@ -314,11 +374,15 @@ var PeerChat = (function() {
 
   var connectTo = function(username) {
     setCurrentPeer(username);
+    if (currentPeer && currentPeer.username != username)
+      return;
     currentPeer.connect();
   };
 
   var offerReceived = function(fromUsername, offer) {
     setCurrentPeer(fromUsername);
+    if (currentPeer && currentPeer.username != fromUsername)
+      return;
     currentPeer.connectFrom(offer);
   };
 
@@ -329,18 +393,24 @@ var PeerChat = (function() {
 
   var iceCandidateReceived = function(fromUsername, candidate) {
     setCurrentPeer(fromUsername);
+    if (currentPeer && currentPeer.username != fromUsername)
+      return;
     if (fromUsername == currentPeer.username)
       currentPeer.onIceCandidateReceived(candidate);
-  }
+  };
 
   var getCurrentPeer = function() {
     return currentPeer;
-  }
+  };
 
   var setCurrentPeer = function(fromUsername) {
     if (currentPeer == null) {
       currentPeer = new Peer(fromUsername);
     }
+  };
+
+  var clearCurrentPeer = function() {
+    currentPeer = null;
   }
   
   return {
@@ -349,7 +419,8 @@ var PeerChat = (function() {
     offerReceived: offerReceived,
     answerReceived: answerReceived,
     iceCandidateReceived: iceCandidateReceived,
-    getCurrentPeer: getCurrentPeer
+    getCurrentPeer: getCurrentPeer,
+    clearCurrentPeer: clearCurrentPeer
   };
 })();
 
